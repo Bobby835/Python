@@ -1,0 +1,11 @@
+score = int (input("Please enter score: "))
+if score == 100:
+  print("Wow Amazing!")
+elif score >= 90:
+  print("Awesome!")
+elif score >= 80:
+  print("Ehh good!")
+elif score >= 70:
+  print("Study harder!")
+else:
+  print("Wow please study more!")
