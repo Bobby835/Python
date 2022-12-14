@@ -1,0 +1,9 @@
+bill = float (input("enter bill amount: "))
+people = int (input("enter the people: "))
+tip = int (input("please select tip amount 15%, 18%, or 20%: "))
+
+total = tip / 100 * bill + bill
+billPer = total / people
+final = round(billPer, 2)
+
+print("You all owe", final)
