@@ -1,0 +1,19 @@
+print("How many seconds are in a year?")
+
+
+sec = 60
+min = 60
+hour = 24
+days = 31
+month = 12
+daysYear = 365
+
+
+print("Non leap year has this many seconds in a year:", (sec * min) * hour * daysYear)
+
+
+print()
+print("Leap year")
+leapYear = 366
+if leapYear:
+  print("Leap year seconds are:", (sec * min) * hour * leapYear)
