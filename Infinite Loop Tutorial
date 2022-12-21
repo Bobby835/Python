@@ -1,0 +1,4 @@
+counter = ""
+while exit != "no":
+  print("💕")
+  exit = input("Exit?: ")
