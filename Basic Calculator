@@ -1,0 +1,6 @@
+X = int (input("Please enter X value: "))
+Y = int (input("Please enter Y value: "))
+Z = int (input("Please enter Z value: "))
+
+
+print((X + Y) / Z)
