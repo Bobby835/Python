@@ -1,0 +1,36 @@
+from getpass import getpass as input
+
+player1 = input("Please enter your pick: ")
+player2 = input("Please enter your pick: ")
+
+if player1 == "R":
+  if player2 == "R":
+    print("Draw both rocks, no winner")
+  elif player2 == "P":
+    print("Player 2 wins! Paper beats Rock! 😍")
+  elif player2 == "S":
+    print("Player 1 wins, rock beats scissors! 👌🏻")
+  else:
+    print("invalid Player 2 move")
+    
+elif player1 == "P":
+  if player2 == "R":
+    print("Player 1 wins!")
+  elif player2 == "P":
+    print("Draw, both paper")
+  elif player2 == "S":
+    print("Player 2 wins, scissors beats paper!")
+  else:
+    print("invalid move player 2")
+
+elif player1 == "S":
+  if player2 == "R":
+    print("Player 2 wins, rock beats scissors")
+  elif player2 == "P":
+    print("Player 1 wins, scissors beats paper")
+  elif player2 == "S":
+    print("Draw, scissor scissor")
+  else:
+    print("Invalid move player 2")
+else:
+  print("Error, please select R, P or S only")
