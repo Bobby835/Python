@@ -1,0 +1,10 @@
+exit = "no"
+while exit == "no":
+  animal = input("enter animal sound: ")
+  if animal == "Cow" or animal == "cow":
+    print("Cow moo")
+  elif animal == "Duck" or animal == "duck":
+    print("Quack")
+  else:
+    print("I dont know")
+  exit = input("Do you want to exit? ")
