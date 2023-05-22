@@ -1,6 +1,5 @@
-print("Epic Battle!!!!")
+print("Epic battle!!!")
 print("Select your move (R, P or S)")
-print()
 
 player1_counter = 0
 player2_counter = 0
@@ -18,7 +17,7 @@ while True:
     elif player2 == "S":
       print("Player 1 wins, rock beats scissors! 👌🏻")
       player1_counter += 1
-      
+   
   elif player1 == "P":
     if player2 == "R":
       print("Player 1 wins!")
@@ -39,9 +38,8 @@ while True:
     elif player2 == "S":
       print("Draw, scissor scissor")
 
-    print("Player 1 has a score of", player1_counter)
-    print("Player 2 has a score of", player2_counter)
-
+  print("Player 1 has", player1_counter, "wins")
+  print("Player 2 has", player2_counter, "wins")
 
   if player1_counter == 3 or player2_counter == 3:
     print("Thanks for playing!")
