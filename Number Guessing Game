@@ -1,0 +1,23 @@
+print("Let's play a Guess the Number game")
+print()
+
+attempts = 1
+correct_guess = 5925
+while True:
+  guess = int(input("Please enter your number guess: "))
+  if guess < 0:
+    print("No negatives")
+    exit()
+  if guess < correct_guess:
+    print("Nope, thats less than")
+    attempts += 1
+  elif guess > correct_guess:
+    print("Nope, too high")
+    attempts += 1
+    continue
+  elif guess == correct_guess:
+    print("You got it!!!")
+    break
+  else:
+    print("Sorry but that is not a number")
+print("Thanks for playing! You got it correct in", attempts, "attempts")
