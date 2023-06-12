@@ -1,0 +1,25 @@
+print("We are creating a guessing game!")
+print("Pick the correct number and you win! If not, try again until you win! :)")
+
+correct_guess = 745
+attempts = 1
+while True:
+  guess = int(input("Please enter your guess: "))
+  if guess < 0:
+    print("Sorry that is not a number")
+    exit()
+  if guess < correct_guess:
+    print("Sorry! That is more than the guess")
+    attempts += 1
+  elif guess > correct_guess:
+    print("Sorry! That is less than correct guess")
+    attempts += 1
+    continue
+  elif guess == correct_guess:
+    print("Correct! You win!")
+    break
+  else:
+    print("Sorry that is not correct!")
+    
+print("Thanks for playing!")
+print("You won in", attempts, "attempts")
