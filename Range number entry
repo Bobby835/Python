@@ -1,0 +1,6 @@
+x = int(input("Please enter a number for X : "))
+y = int(input("Please enter a number for Y : "))
+z = int(input("Please enter a number for Z : "))
+
+for i in range(x, y, z):
+  print(i)
