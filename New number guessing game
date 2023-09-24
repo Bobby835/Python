@@ -1,0 +1,22 @@
+print("Lets make a number guessing game")
+print()
+Correct_guess = 345
+counter = 1
+
+while True:
+  user_guess = int(input("Please enter your number guess: "))
+  if user_guess < 0:
+    print("Sorry that is not a number")
+    counter += 1
+  elif user_guess > Correct_guess:
+    print("Wrong, higher than correct guess")
+    counter += 1
+  elif user_guess < Correct_guess:
+    print("Wrong, less than correct guess")
+    counter += 1
+  elif user_guess == Correct_guess:
+    print("Correct! You got it! :)")
+    break
+  else:
+    print("That is not a number")
+print("You got the correct guess in", counter, "attempts")
