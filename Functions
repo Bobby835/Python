@@ -1,0 +1,29 @@
+def calc(x,y,z):
+    s = (x+y) - z
+    return s
+result = calc(5,5, 2)
+print(result)
+
+def arithmetic_operation(x, y):
+    z = (x + y)
+    return z
+result = arithmetic_operation(5,5)
+print(result)
+
+def divide_operation(x, y):
+    z = (x / y)
+    return z
+result = divide_operation(5,5)
+print(result)
+
+def add_sub_mul_div(a, b):
+    results = {
+        "addition": a + b,
+        "subtraction": a - b,
+        "multiplication": a * b,
+        "division": a / b if b != 0 else "Error! Division by zero."
+    }
+    return results
+
+result = add_sub_mul_div(5, 5)
+print(result)
