@@ -1,0 +1,30 @@
+#Let's create a rock, paper, scissors game!
+
+r = "Rock"
+p = "Paper"
+s = "Scissors"
+#Just added a while loop, so now it loops the game
+while True:
+        x = input("Player 1 please enter, Rock, Paper, or Scissors: ")
+        y = input("Player 2 please enter, Rock, Paper, or Scissors: ")
+        if x == r and y == r:
+            print("Rock and Rock, stalemate!")
+        elif x == r and y == p:
+            print("Paper beats rock, player 2 wins")
+        elif x == r and y == s:
+            print("Rock beats scissors, player 2 wins")
+        elif x == p and y == r:
+            print("Paper beats rock, player 1 wins")
+        elif x == p and y == p:
+            print("Paper, paper, stalemate!")
+        elif x == p and y == s:
+            print("Scissors beat paper, player 2 wins")
+        elif x == s and y == r:
+            print("Rock beats scissors, player 2 wins")
+        elif x == s and y == p:
+            print("Scissors beats paper, player 1 wins")
+        elif x == s and y == s:
+            print("Scissors, scissors, stalemate!")
+        else:
+            print("Error, please enter a valid choice")
+            break
