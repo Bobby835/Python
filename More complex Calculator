@@ -1,0 +1,49 @@
+#Let's make a calculator game, where it prompts the user of what it would like to do first
+
+
+while True:
+    prompt = input("Would you like to add, sub, multiply, or divide two numbers? ")
+    def add():
+        x = int(input("Please select num1: "))
+        y = int(input("Please select num2: "))
+        return x + y
+        #print(add())
+
+    def sub():
+        x = int(input("Please select num1: "))
+        y = int(input("Please select num2: "))
+        return x - y
+        #print(sub())
+
+    def multiply():
+        x = int(input("Please select num1: "))
+        y = int(input("Please select num2: "))
+        return x * y
+        #print(multiply())
+
+    def divide():
+        x = int(input("Please select num1: "))
+        y = int(input("Please select num2: "))
+        return x / y
+        #print(divide())
+
+    if prompt == "add":
+        print(add())
+        #continue, DONT NEED CONTINUE UNLESS YOU USE BREAK
+    elif prompt == "sub":
+        print(sub())
+        #continue
+    elif prompt == "multiply":
+        print(multiply())
+        #continue
+    elif prompt == "divide":
+        print(divide())
+        #continue
+    else:
+        print("Sorry, try again")
+        try_again = input("Would you like to try again? Y/N ")
+        if try_again.lower() == "y":
+            print("Go again!")
+        else:
+            print("Thanks for playing!")
+            break
