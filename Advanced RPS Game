@@ -1,0 +1,47 @@
+#I want to create a R,P,S game that has user input vs computer. need 4 functions, 1. user input, 2 computer input 3 winner condition, 4 gameplay
+
+import random
+
+user_score = 0
+computer_score = 0
+def get_user_input():
+    choices = ['rock', 'paper', 'scissors']
+    user_choice = input("rock, paper scissors? ").lower()
+    while user_choice not in choices:
+        print("Please select a valid choice")
+        user_choice = input("rock, paper scissors? ").lower()
+    return user_choice
+
+def computer_input():
+    choices = ['rock', 'paper', 'scissors']
+    return random.choice(choices)
+
+def winner_condition(user_choice, computer_choice):
+    global user_score, computer_score  # Access global variables to update scores
+    if user_choice == computer_choice:
+        return "It's a tie!"
+    elif (user_choice == 'rock' and computer_choice == 'scissors') or \
+            (user_choice == 'paper' and computer_choice == 'rock') or \
+            (user_choice == 'scissors' and computer_choice == 'paper'):
+        user_score += 1
+        return "You win!"
+    else:
+        computer_score += 1
+        return "Computer wins!"
+def play_game():
+    while True:
+        user_choice = get_user_input()
+        computer_choice = computer_input()
+        print(f"You chose: {user_choice}")
+        print(f"Computer chose: {computer_choice}")
+        print(winner_condition(user_choice, computer_choice))
+
+        play_again = input("Do you want to play again? (yes/no): ").lower()
+        if play_again != 'yes':
+            print("Thanks for playing! Goodbye!")
+            break
+
+if __name__ == "__main__":
+    play_game()
+
+print(f"Final Score - You: {user_score} Computer: {computer_score}")
