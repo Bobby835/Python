@@ -1,0 +1,21 @@
+print("Input a username with no more than 12 characters, no spaces, and no digits")
+user_name = input("What's your username? ")
+
+while True:
+    if len(user_name) > 12:
+        print("Can't be above 12 characters")
+    elif any(char.isdigit() for char in user_name):
+        print("No Values!")
+    elif " " in user_name:
+        print("No spaces!")
+    elif user_name == "":
+        print("Can't be empty")
+    else:
+        print(f"Welcome! {user_name}")
+
+    try_again = input("Want to go again? ").lower()
+    if try_again == "y" or try_again == "yes":
+        user_name = input("What's your username? ")
+    else:
+        print("Thanks!")
+        break
