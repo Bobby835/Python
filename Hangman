@@ -1,0 +1,21 @@
+print("Hello, welcome!")
+word_list = ["apple", "banana", "cherry"]
+
+def hangman(word_list):
+    while True:
+        guess = input("Input a letter and I'll let you know if your guess is in the word list ").lower()
+        if guess in word_list[1]:
+            print(f"Correct! Your guess was {guess}")
+            if guess == "banana":
+                print("You got it! Word was banana")
+                break
+        else:
+            print(f"Nope! Your guess was {guess}")
+        try_again = input("Press anything to continue, if not Press F ")
+        if try_again == "F":
+            break
+
+hangman(word_list)
+
+
+#print(word_list[0])
