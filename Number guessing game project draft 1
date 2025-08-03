@@ -32,3 +32,33 @@ while True:
     play_again = input("Press anything to continue, q to quit ")
     if play_again == 'q':
         break
+
+
+
+#Third Draft
+import random
+
+print("Guess a number between 1 and 100")
+
+
+# print(random_number)
+random_number = random.randint(1, 100)
+
+while True:
+    try:
+        user_guess = int(input("Guess a number between 1-100: "))
+    except ValueError:
+        print("Needs to be a valid number!")
+        continue
+
+    if user_guess == random_number:
+        print(f"You guessed correct! The random number was: {random_number}")
+    elif user_guess > random_number:
+        print("Too high!")
+    elif user_guess < random_number:
+        print("Too low!")
+    else:
+        print(f"Wrong, you guessed: {user_guess}", f"Random number was: {random_number}")
+    play_again = input("Press anything to continue, q to quit ")
+    if play_again == 'q':
+        break
