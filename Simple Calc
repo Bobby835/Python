@@ -1,0 +1,17 @@
+first_num = int(input("What is the first number? "))
+second_num = int(input("What is the second number? "))
+user_input = input("a, s, m, or d? Select one please: ").lower()
+
+
+if user_input == "a":
+    a = (first_num + second_num)
+    print(a)
+if user_input == "s":
+    a = (first_num - second_num)
+    print(a)
+if user_input == "m":
+    a = (first_num * second_num)
+    print(float(a))
+if user_input == "d":
+    a = (first_num / second_num)
+    print(a)
