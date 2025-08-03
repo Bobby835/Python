@@ -1,0 +1,23 @@
+import time
+
+print("Let's make a countdown timer program!")
+
+# for i in range(100, 1, -1):
+#     time.sleep(1)
+#     print(i)
+while True:
+    try:
+        user_countdown = int(input("How many seconds should we countdown from? "))
+    except ValueError:
+        print("Need a integer")
+    try:
+        user_maxnum = int(input("Countdown from? "))
+    except ValueError:
+        print("Need a integer")
+    try:
+        user_step = int(input("Should we incriment? "))
+    except ValueError:
+        print("Need a integer")
+    for x in reversed(range(1, user_maxnum, user_step)):
+        time.sleep(user_countdown)
+        print(x)
