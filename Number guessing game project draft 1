@@ -10,3 +10,25 @@ if user_guess == random_number:
     print(f"You guessed correct! The random number was: {random_number}")
 else:
     print(f"Wrong, you guessed: {user_guess}", f"Random number was: {random_number}")
+
+
+
+
+#Second Draft
+import random
+
+print("Guess a number between 1 and 100")
+
+
+# print(random_number)
+
+while True:
+    random_number = random.randint(1, 100)
+    user_guess = int(input("Guess a number between 1-100: "))
+    if user_guess == random_number:
+        print(f"You guessed correct! The random number was: {random_number}")
+    else:
+        print(f"Wrong, you guessed: {user_guess}", f"Random number was: {random_number}")
+    play_again = input("Press anything to continue, q to quit ")
+    if play_again == 'q':
+        break
