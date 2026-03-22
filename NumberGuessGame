@@ -1,0 +1,18 @@
+# Number guessing game
+
+import random
+
+random_guess = random.randint(1, 10)
+
+def function():
+    while True:
+        guess = int(input("What is your number guess between 1 - 10? "))
+        if guess == random_guess:
+            print(f"Yes! Guess was {random_guess}")
+            break
+        elif guess > random_guess:
+            print("Too high")
+        elif guess < random_guess:
+            print("Too low")
+
+function()
