@@ -1,0 +1,336 @@
+"""
+Scheduling App — manage appointments and events from the command line.
+
+Run: python scheduling_app.py
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Optional
+
+
+DATA_FILE = Path(__file__).with_name("schedule_data.json")
+DATE_FORMAT = "%Y-%m-%d"
+TIME_FORMAT = "%H:%M"
+DATETIME_FORMAT = f"{DATE_FORMAT} {TIME_FORMAT}"
+
+
+@dataclass
+class Event:
+    title: str
+    start: datetime
+    end: datetime
+    description: str = ""
+    id: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%d%H%M%S%f"))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "start": self.start.strftime(DATETIME_FORMAT),
+            "end": self.end.strftime(DATETIME_FORMAT),
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Event:
+        return cls(
+            id=data["id"],
+            title=data["title"],
+            start=datetime.strptime(data["start"], DATETIME_FORMAT),
+            end=datetime.strptime(data["end"], DATETIME_FORMAT),
+            description=data.get("description", ""),
+        )
+
+
+class Scheduler:
+    def __init__(self, data_file: Path = DATA_FILE) -> None:
+        self.data_file = data_file
+        self.events: list[Event] = []
+        self.load()
+
+    def load(self) -> None:
+        if not self.data_file.exists():
+            self.events = []
+            return
+        try:
+            raw = json.loads(self.data_file.read_text(encoding="utf-8"))
+            self.events = [Event.from_dict(item) for item in raw]
+            self.events.sort(key=lambda e: e.start)
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            print(f"Warning: could not load schedule ({exc}). Starting fresh.")
+            self.events = []
+
+    def save(self) -> None:
+        payload = [event.to_dict() for event in self.events]
+        self.data_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def add_event(
+        self,
+        title: str,
+        start: datetime,
+        end: datetime,
+        description: str = "",
+    ) -> Event:
+        if end <= start:
+            raise ValueError("End time must be after start time.")
+        event = Event(title=title, start=start, end=end, description=description)
+        self.events.append(event)
+        self.events.sort(key=lambda e: e.start)
+        self.save()
+        return event
+
+    def delete_event(self, event_id: str) -> bool:
+        before = len(self.events)
+        self.events = [e for e in self.events if e.id != event_id]
+        if len(self.events) == before:
+            return False
+        self.save()
+        return True
+
+    def find_event(self, event_id: str) -> Optional[Event]:
+        for event in self.events:
+            if event.id == event_id:
+                return event
+        return None
+
+    def events_on(self, day: date) -> list[Event]:
+        return [e for e in self.events if e.start.date() == day]
+
+    def events_in_range(self, start: date, end: date) -> list[Event]:
+        return [e for e in self.events if start <= e.start.date() <= end]
+
+    def conflicts_with(
+        self, start: datetime, end: datetime, exclude_id: Optional[str] = None
+    ) -> list[Event]:
+        overlapping = []
+        for event in self.events:
+            if exclude_id and event.id == exclude_id:
+                continue
+            if start < event.end and end > event.start:
+                overlapping.append(event)
+        return overlapping
+
+
+def parse_date(value: str, label: str = "Date") -> date:
+    try:
+        return datetime.strptime(value.strip(), DATE_FORMAT).date()
+    except ValueError as exc:
+        raise ValueError(f"{label} must be in YYYY-MM-DD format.") from exc
+
+
+def parse_time(value: str, label: str = "Time") -> datetime:
+    """Parse HH:MM and return a datetime anchored to today (time only matters)."""
+    try:
+        return datetime.strptime(value.strip(), TIME_FORMAT)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be in HH:MM (24-hour) format.") from exc
+
+
+def combine_date_time(day: date, time_part: datetime) -> datetime:
+    return datetime.combine(day, time_part.time())
+
+
+def prompt(text: str, default: str = "") -> str:
+    suffix = f" [{default}]" if default else ""
+    value = input(f"{text}{suffix}: ").strip()
+    return value or default
+
+
+def format_event(event: Event) -> str:
+    duration = event.end - event.start
+    hours, remainder = divmod(int(duration.total_seconds()), 3600)
+    minutes = remainder // 60
+    duration_str = f"{hours}h {minutes}m" if hours else f"{minutes}m"
+    lines = [
+        f"  ID: {event.id}",
+        f"  Title: {event.title}",
+        f"  When: {event.start.strftime(DATETIME_FORMAT)} → {event.end.strftime(TIME_FORMAT)}",
+        f"  Duration: {duration_str}",
+    ]
+    if event.description:
+        lines.append(f"  Notes: {event.description}")
+    return "\n".join(lines)
+
+
+def print_events(events: list[Event], heading: str) -> None:
+    print(f"\n{heading}")
+    print("-" * len(heading))
+    if not events:
+        print("  No events found.")
+        return
+    for i, event in enumerate(events, start=1):
+        print(f"\n{i}. {event.title}")
+        print(format_event(event))
+
+
+def handle_add(scheduler: Scheduler) -> None:
+    print("\n--- Add Event ---")
+    title = prompt("Title")
+    if not title:
+        print("Title is required.")
+        return
+
+    today = date.today().strftime(DATE_FORMAT)
+    try:
+        day = parse_date(prompt("Date (YYYY-MM-DD)", today))
+        start_time = parse_time(prompt("Start time (HH:MM)", "09:00"), "Start time")
+        end_time = parse_time(prompt("End time (HH:MM)", "10:00"), "End time")
+        start = combine_date_time(day, start_time)
+        end = combine_date_time(day, end_time)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return
+
+    description = prompt("Description (optional)")
+
+    conflicts = scheduler.conflicts_with(start, end)
+    if conflicts:
+        print("\nWarning: this overlaps with:")
+        for event in conflicts:
+            print(f"  • {event.title} ({event.start.strftime(TIME_FORMAT)}–{event.end.strftime(TIME_FORMAT)})")
+        if prompt("Add anyway? (y/n)", "n").lower() != "y":
+            print("Cancelled.")
+            return
+
+    try:
+        event = scheduler.add_event(title, start, end, description)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return
+
+    print(f"\nAdded: {event.title} on {event.start.strftime(DATETIME_FORMAT)}")
+
+
+def handle_view_day(scheduler: Scheduler) -> None:
+    print("\n--- View Day ---")
+    today = date.today().strftime(DATE_FORMAT)
+    try:
+        day = parse_date(prompt("Date (YYYY-MM-DD)", today))
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return
+    events = scheduler.events_on(day)
+    print_events(events, f"Schedule for {day.strftime('%A, %B %d, %Y')}")
+
+
+def handle_view_week(scheduler: Scheduler) -> None:
+    print("\n--- View Week ---")
+    today = date.today().strftime(DATE_FORMAT)
+    try:
+        start_day = parse_date(prompt("Week starting (YYYY-MM-DD)", today))
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return
+    end_day = start_day + timedelta(days=6)
+    events = scheduler.events_in_range(start_day, end_day)
+    print_events(
+        events,
+        f"Week of {start_day.strftime('%b %d')} – {end_day.strftime('%b %d, %Y')}",
+    )
+
+
+def handle_view_all(scheduler: Scheduler) -> None:
+    print_events(scheduler.events, "All Upcoming Events")
+
+
+def handle_delete(scheduler: Scheduler) -> None:
+    if not scheduler.events:
+        print("\nNo events to delete.")
+        return
+
+    print("\n--- Delete Event ---")
+    print_events(scheduler.events, "Select an event to delete")
+    choice = prompt("Enter event number or ID")
+    if not choice:
+        return
+
+    event: Optional[Event] = None
+    if choice.isdigit():
+        index = int(choice) - 1
+        if 0 <= index < len(scheduler.events):
+            event = scheduler.events[index]
+    else:
+        event = scheduler.find_event(choice)
+
+    if not event:
+        print("Event not found.")
+        return
+
+    if prompt(f"Delete '{event.title}'? (y/n)", "n").lower() == "y":
+        scheduler.delete_event(event.id)
+        print("Event deleted.")
+
+
+def handle_search(scheduler: Scheduler) -> None:
+    print("\n--- Search Events ---")
+    query = prompt("Search by title").lower()
+    if not query:
+        return
+    matches = [e for e in scheduler.events if query in e.title.lower()]
+    print_events(matches, f"Results for '{query}'")
+
+
+def print_menu() -> None:
+    print("\n" + "=" * 40)
+    print("       SCHEDULING APP")
+    print("=" * 40)
+    print("  1. Add event")
+    print("  2. View today's schedule")
+    print("  3. View a specific day")
+    print("  4. View week")
+    print("  5. View all events")
+    print("  6. Delete event")
+    print("  7. Search events")
+    print("  8. Exit")
+    print("=" * 40)
+
+
+def main() -> None:
+    scheduler = Scheduler()
+    print("Welcome to the Scheduling App!")
+    print(f"Data saved to: {scheduler.data_file}")
+
+    while True:
+        print_menu()
+        choice = prompt("Choose an option", "1")
+
+        if choice == "8":
+            print("Goodbye!")
+            break
+        elif choice == "1":
+            handle_add(scheduler)
+        elif choice == "2":
+            today = date.today().strftime(DATE_FORMAT)
+            try:
+                day = parse_date(today)
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                continue
+            events = scheduler.events_on(day)
+            print_events(events, f"Today's schedule ({day.strftime('%A, %B %d, %Y')})")
+        elif choice == "3":
+            handle_view_day(scheduler)
+        elif choice == "4":
+            handle_view_week(scheduler)
+        elif choice == "5":
+            handle_view_all(scheduler)
+        elif choice == "6":
+            handle_delete(scheduler)
+        elif choice == "7":
+            handle_search(scheduler)
+        else:
+            print("Invalid option. Please choose 1–8.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\nGoodbye!")
+        sys.exit(0)
