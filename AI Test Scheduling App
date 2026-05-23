@@ -1,0 +1,579 @@
+"""
+Scheduling App — manage appointments and events.
+
+Run: python scheduling_app.py
+"""
+
+from __future__ import annotations
+
+import json
+import tkinter as tk
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from tkinter import messagebox, ttk
+from typing import Optional
+
+
+DATA_FILE = Path(__file__).with_name("schedule_data.json")
+DATE_FORMAT = "%Y-%m-%d"
+TIME_FORMAT = "%H:%M"
+DATETIME_FORMAT = f"{DATE_FORMAT} {TIME_FORMAT}"
+
+
+@dataclass
+class Event:
+    title: str
+    start: datetime
+    end: datetime
+    description: str = ""
+    id: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%d%H%M%S%f"))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "start": self.start.strftime(DATETIME_FORMAT),
+            "end": self.end.strftime(DATETIME_FORMAT),
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Event:
+        return cls(
+            id=data["id"],
+            title=data["title"],
+            start=datetime.strptime(data["start"], DATETIME_FORMAT),
+            end=datetime.strptime(data["end"], DATETIME_FORMAT),
+            description=data.get("description", ""),
+        )
+
+
+class Scheduler:
+    def __init__(self, data_file: Path = DATA_FILE) -> None:
+        self.data_file = data_file
+        self.events: list[Event] = []
+        self.load()
+
+    def load(self) -> None:
+        if not self.data_file.exists():
+            self.events = []
+            return
+        try:
+            raw = json.loads(self.data_file.read_text(encoding="utf-8"))
+            self.events = [Event.from_dict(item) for item in raw]
+            self.events.sort(key=lambda e: e.start)
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            print(f"Warning: could not load schedule ({exc}). Starting fresh.")
+            self.events = []
+
+    def save(self) -> None:
+        payload = [event.to_dict() for event in self.events]
+        self.data_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def add_event(
+        self,
+        title: str,
+        start: datetime,
+        end: datetime,
+        description: str = "",
+    ) -> Event:
+        if end <= start:
+            raise ValueError("End time must be after start time.")
+        event = Event(title=title, start=start, end=end, description=description)
+        self.events.append(event)
+        self.events.sort(key=lambda e: e.start)
+        self.save()
+        return event
+
+    def delete_event(self, event_id: str) -> bool:
+        before = len(self.events)
+        self.events = [e for e in self.events if e.id != event_id]
+        if len(self.events) == before:
+            return False
+        self.save()
+        return True
+
+    def find_event(self, event_id: str) -> Optional[Event]:
+        for event in self.events:
+            if event.id == event_id:
+                return event
+        return None
+
+    def events_on(self, day: date) -> list[Event]:
+        return [e for e in self.events if e.start.date() == day]
+
+    def events_in_range(self, start: date, end: date) -> list[Event]:
+        return [e for e in self.events if start <= e.start.date() <= end]
+
+    def conflicts_with(
+        self, start: datetime, end: datetime, exclude_id: Optional[str] = None
+    ) -> list[Event]:
+        overlapping = []
+        for event in self.events:
+            if exclude_id and event.id == exclude_id:
+                continue
+            if start < event.end and end > event.start:
+                overlapping.append(event)
+        return overlapping
+
+
+def parse_date(value: str, label: str = "Date") -> date:
+    try:
+        return datetime.strptime(value.strip(), DATE_FORMAT).date()
+    except ValueError as exc:
+        raise ValueError(f"{label} must be in YYYY-MM-DD format.") from exc
+
+
+def parse_time(value: str, label: str = "Time") -> datetime:
+    try:
+        return datetime.strptime(value.strip(), TIME_FORMAT)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be in HH:MM (24-hour) format.") from exc
+
+
+def combine_date_time(day: date, time_part: datetime) -> datetime:
+    return datetime.combine(day, time_part.time())
+
+
+def format_duration(event: Event) -> str:
+    duration = event.end - event.start
+    hours, remainder = divmod(int(duration.total_seconds()), 3600)
+    minutes = remainder // 60
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def format_day_heading(day: date) -> str:
+    return day.strftime("%A, %B %d, %Y")
+
+
+class SchedulingApp:
+    """Desktop interface for managing scheduled events."""
+
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.scheduler = Scheduler()
+        self.selected_id: Optional[str] = None
+        self.current_view = "today"
+        self.view_date = date.today()
+        self.week_start = date.today()
+
+        self.root.title("Scheduling App")
+        self.root.geometry("1050x700")
+        self.root.minsize(880, 580)
+        self.root.configure(bg="#f3f4f6")
+
+        self._setup_styles()
+        self._build_layout()
+        self.show_today()
+        self.refresh_all()
+
+    def _setup_styles(self) -> None:
+        style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+
+        style.configure("App.TFrame", background="#f3f4f6")
+        style.configure("Header.TFrame", background="#0f766e")
+        style.configure("Header.TLabel", background="#0f766e", foreground="#ffffff", font=("Helvetica", 18, "bold"))
+        style.configure("Subheader.TLabel", background="#0f766e", foreground="#ccfbf1", font=("Helvetica", 11))
+        style.configure("Nav.TButton", font=("Helvetica", 11), padding=(12, 8))
+        style.configure("Primary.TButton", font=("Helvetica", 11, "bold"), padding=(14, 8))
+        style.configure("Card.TFrame", background="#ffffff", relief="flat")
+        style.configure("CardTitle.TLabel", background="#ffffff", font=("Helvetica", 13, "bold"), foreground="#111827")
+        style.configure("CardValue.TLabel", background="#ffffff", font=("Helvetica", 22, "bold"), foreground="#0f766e")
+        style.configure("CardSub.TLabel", background="#ffffff", font=("Helvetica", 10), foreground="#6b7280")
+        style.configure("Detail.TLabel", background="#ffffff", font=("Helvetica", 11), foreground="#374151")
+        style.configure("DetailTitle.TLabel", background="#ffffff", font=("Helvetica", 16, "bold"), foreground="#111827")
+        style.configure("Treeview", font=("Helvetica", 11), rowheight=30)
+        style.configure("Treeview.Heading", font=("Helvetica", 11, "bold"))
+
+    def _build_layout(self) -> None:
+        header = ttk.Frame(self.root, style="Header.TFrame")
+        header.pack(fill="x")
+
+        title_block = ttk.Frame(header, style="Header.TFrame")
+        title_block.pack(side="left", padx=24, pady=16)
+        ttk.Label(title_block, text="Scheduling App", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(
+            title_block,
+            text="Manage appointments and events",
+            style="Subheader.TLabel",
+        ).pack(anchor="w")
+
+        ttk.Button(
+            header,
+            text="+ New Event",
+            style="Primary.TButton",
+            command=self.open_create_dialog,
+        ).pack(side="right", padx=24, pady=16)
+
+        body = ttk.Frame(self.root, style="App.TFrame", padding=16)
+        body.pack(fill="both", expand=True)
+
+        nav = ttk.Frame(body, style="App.TFrame")
+        nav.pack(fill="x", pady=(0, 12))
+        ttk.Button(nav, text="Today", style="Nav.TButton", command=self.show_today).pack(side="left", padx=(0, 8))
+        ttk.Button(nav, text="Week", style="Nav.TButton", command=self.show_week).pack(side="left", padx=(0, 8))
+        ttk.Button(nav, text="All Events", style="Nav.TButton", command=self.show_all).pack(side="left")
+
+        self.content = ttk.Frame(body, style="App.TFrame")
+        self.content.pack(fill="both", expand=True)
+
+        self.summary_frame = ttk.Frame(self.content, style="App.TFrame")
+        self.schedule_frame = ttk.Frame(self.content, style="App.TFrame")
+        self._build_summary()
+        self._build_schedule_view()
+
+    def _build_summary(self) -> None:
+        cards = ttk.Frame(self.summary_frame, style="App.TFrame")
+        cards.pack(fill="x", pady=(0, 16))
+
+        self.stat_vars: dict[str, tk.StringVar] = {}
+        card_defs = [
+            ("today", "Events Today", "0"),
+            ("week", "Events This Week", "0"),
+            ("upcoming", "Upcoming Total", "0"),
+            ("next", "Next Event", "None"),
+        ]
+        for key, title, default in card_defs:
+            card = ttk.Frame(cards, style="Card.TFrame", padding=20)
+            card.pack(side="left", fill="both", expand=True, padx=(0, 12))
+            ttk.Label(card, text=title, style="CardSub.TLabel").pack(anchor="w")
+            var = tk.StringVar(value=default)
+            self.stat_vars[key] = var
+            font = ("Helvetica", 14, "bold") if key == "next" else ("Helvetica", 22, "bold")
+            tk.Label(card, textvariable=var, bg="#ffffff", fg="#0f766e", font=font, anchor="w").pack(
+                anchor="w", pady=(6, 0), fill="x"
+            )
+
+    def _build_schedule_view(self) -> None:
+        toolbar = ttk.Frame(self.schedule_frame, style="App.TFrame")
+        toolbar.pack(fill="x", pady=(0, 12))
+
+        self.view_label = ttk.Label(toolbar, text="", font=("Helvetica", 13, "bold"))
+        self.view_label.pack(side="left")
+
+        nav_buttons = ttk.Frame(toolbar, style="App.TFrame")
+        nav_buttons.pack(side="left", padx=(16, 0))
+        ttk.Button(nav_buttons, text="◀ Prev", command=self.go_prev).pack(side="left", padx=(0, 6))
+        ttk.Button(nav_buttons, text="Today", command=self.go_today).pack(side="left", padx=(0, 6))
+        ttk.Button(nav_buttons, text="Next ▶", command=self.go_next).pack(side="left")
+
+        ttk.Label(toolbar, text="Search:").pack(side="right")
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *_: self.refresh_table())
+        ttk.Entry(toolbar, textvariable=self.search_var, width=24).pack(side="right", padx=(6, 0))
+
+        paned = ttk.Panedwindow(self.schedule_frame, orient="horizontal")
+        paned.pack(fill="both", expand=True)
+
+        table_frame = ttk.Frame(paned, style="Card.TFrame", padding=8)
+        paned.add(table_frame, weight=3)
+
+        columns = ("title", "date", "start", "end", "duration")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+        self.tree.heading("title", text="Event")
+        self.tree.heading("date", text="Date")
+        self.tree.heading("start", text="Start")
+        self.tree.heading("end", text="End")
+        self.tree.heading("duration", text="Duration")
+        self.tree.column("title", width=200, anchor="w")
+        self.tree.column("date", width=110, anchor="w")
+        self.tree.column("start", width=70, anchor="w")
+        self.tree.column("end", width=70, anchor="w")
+        self.tree.column("duration", width=80, anchor="w")
+        self.tree.tag_configure("past", foreground="#9ca3af")
+        self.tree.tag_configure("now", foreground="#0f766e")
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+
+        tree_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tree_scroll.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        tree_scroll.pack(side="right", fill="y")
+
+        detail_frame = ttk.Frame(paned, style="Card.TFrame", padding=16)
+        paned.add(detail_frame, weight=2)
+
+        self.detail_title = ttk.Label(detail_frame, text="Select an event", style="DetailTitle.TLabel")
+        self.detail_title.pack(anchor="w", pady=(0, 12))
+
+        self.detail_body = ttk.Label(detail_frame, text="", style="Detail.TLabel", wraplength=320, justify="left")
+        self.detail_body.pack(anchor="w", fill="x")
+
+        actions = ttk.Frame(detail_frame, style="Card.TFrame")
+        actions.pack(fill="x", pady=(20, 0))
+        self.delete_button = ttk.Button(actions, text="Delete Event", command=self.delete_selected, state="disabled")
+        self.delete_button.pack(side="left")
+
+    def show_today(self) -> None:
+        self.current_view = "today"
+        self.view_date = date.today()
+        self._show_schedule_view()
+
+    def show_week(self) -> None:
+        self.current_view = "week"
+        self.week_start = date.today()
+        self._show_schedule_view()
+
+    def show_all(self) -> None:
+        self.current_view = "all"
+        self._show_schedule_view()
+
+    def _show_schedule_view(self) -> None:
+        self.summary_frame.pack(fill="x", pady=(0, 8))
+        self.schedule_frame.pack(fill="both", expand=True)
+        self.refresh_all()
+
+    def go_today(self) -> None:
+        if self.current_view == "week":
+            self.week_start = date.today()
+        else:
+            self.view_date = date.today()
+        self.refresh_all()
+
+    def go_prev(self) -> None:
+        if self.current_view == "week":
+            self.week_start -= timedelta(days=7)
+        elif self.current_view == "today":
+            self.view_date -= timedelta(days=1)
+        self.refresh_all()
+
+    def go_next(self) -> None:
+        if self.current_view == "week":
+            self.week_start += timedelta(days=7)
+        elif self.current_view == "today":
+            self.view_date += timedelta(days=1)
+        self.refresh_all()
+
+    def refresh_summary(self) -> None:
+        today = date.today()
+        week_end = today + timedelta(days=6)
+        today_events = self.scheduler.events_on(today)
+        week_events = self.scheduler.events_in_range(today, week_end)
+        upcoming = [e for e in self.scheduler.events if e.start.date() >= today]
+
+        self.stat_vars["today"].set(str(len(today_events)))
+        self.stat_vars["week"].set(str(len(week_events)))
+        self.stat_vars["upcoming"].set(str(len(upcoming)))
+
+        if upcoming:
+            next_event = upcoming[0]
+            self.stat_vars["next"].set(
+                f"{next_event.title}\n{next_event.start.strftime('%b %d · %H:%M')}"
+            )
+        else:
+            self.stat_vars["next"].set("None scheduled")
+
+    def _view_heading(self) -> str:
+        if self.current_view == "today":
+            prefix = "Today" if self.view_date == date.today() else "Day"
+            return f"{prefix}: {format_day_heading(self.view_date)}"
+        if self.current_view == "week":
+            week_end = self.week_start + timedelta(days=6)
+            return (
+                f"Week: {self.week_start.strftime('%b %d')} – "
+                f"{week_end.strftime('%b %d, %Y')}"
+            )
+        return "All Events"
+
+    def _events_for_view(self) -> list[Event]:
+        if self.current_view == "today":
+            return self.scheduler.events_on(self.view_date)
+        if self.current_view == "week":
+            week_end = self.week_start + timedelta(days=6)
+            return self.scheduler.events_in_range(self.week_start, week_end)
+        return list(self.scheduler.events)
+
+    def _filtered_events(self) -> list[Event]:
+        events = self._events_for_view()
+        query = self.search_var.get().strip().lower()
+        if query:
+            events = [
+                e
+                for e in events
+                if query in e.title.lower() or query in e.description.lower()
+            ]
+        return sorted(events, key=lambda e: e.start)
+
+    def refresh_table(self) -> None:
+        selected = self.selected_id
+        self.view_label.configure(text=self._view_heading())
+
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+
+        now = datetime.now()
+        visible_ids: list[str] = []
+        for event in self._filtered_events():
+            tags: tuple[str, ...] = ()
+            if event.end < now:
+                tags = ("past",)
+            elif event.start <= now <= event.end:
+                tags = ("now",)
+
+            self.tree.insert(
+                "",
+                tk.END,
+                iid=event.id,
+                values=(
+                    event.title,
+                    event.start.strftime(DATE_FORMAT),
+                    event.start.strftime(TIME_FORMAT),
+                    event.end.strftime(TIME_FORMAT),
+                    format_duration(event),
+                ),
+                tags=tags,
+            )
+            visible_ids.append(event.id)
+
+        if selected and selected in visible_ids:
+            self.tree.selection_set(selected)
+            self.tree.focus(selected)
+        else:
+            self.selected_id = None
+            self._show_detail(None)
+
+    def refresh_all(self) -> None:
+        self.refresh_summary()
+        self.refresh_table()
+
+    def _on_select(self, _event: Optional[tk.Event] = None) -> None:
+        selection = self.tree.selection()
+        if not selection:
+            self.selected_id = None
+            self._show_detail(None)
+            return
+        self.selected_id = selection[0]
+        event = self.scheduler.find_event(self.selected_id)
+        self._show_detail(event)
+
+    def _show_detail(self, event: Optional[Event]) -> None:
+        if not event:
+            self.detail_title.configure(text="Select an event")
+            self.detail_body.configure(
+                text="Click a row to view event details or delete an event."
+            )
+            self.delete_button.configure(state="disabled")
+            return
+
+        self.detail_title.configure(text=event.title)
+        lines = [
+            f"Date: {event.start.strftime(DATE_FORMAT)}",
+            f"Time: {event.start.strftime(TIME_FORMAT)} – {event.end.strftime(TIME_FORMAT)}",
+            f"Duration: {format_duration(event)}",
+        ]
+        if event.description:
+            lines.append(f"\nNotes:\n{event.description}")
+
+        self.detail_body.configure(text="\n".join(lines))
+        self.delete_button.configure(state="normal")
+
+    def open_create_dialog(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("New Event")
+        dialog.geometry("440x420")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        form = ttk.Frame(dialog, padding=24)
+        form.pack(fill="both", expand=True)
+
+        title_var = tk.StringVar()
+        date_var = tk.StringVar(value=date.today().strftime(DATE_FORMAT))
+        start_var = tk.StringVar(value="09:00")
+        end_var = tk.StringVar(value="10:00")
+
+        fields = [
+            (0, "Title *", ttk.Entry(form, textvariable=title_var, width=38)),
+            (1, "Date (YYYY-MM-DD) *", ttk.Entry(form, textvariable=date_var, width=38)),
+            (2, "Start time (HH:MM) *", ttk.Entry(form, textvariable=start_var, width=38)),
+            (3, "End time (HH:MM) *", ttk.Entry(form, textvariable=end_var, width=38)),
+        ]
+        for row, label, widget in fields:
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky="nw", pady=6)
+            widget.grid(row=row, column=1, sticky="ew", pady=6)
+
+        ttk.Label(form, text="Description").grid(row=4, column=0, sticky="nw", pady=6)
+        description_box = tk.Text(form, height=4, width=36, font=("Helvetica", 11))
+        description_box.grid(row=4, column=1, sticky="ew", pady=6)
+        form.columnconfigure(1, weight=1)
+
+        def save() -> None:
+            title = title_var.get().strip()
+            if not title:
+                messagebox.showerror("Missing title", "Please enter an event title.", parent=dialog)
+                return
+            try:
+                day = parse_date(date_var.get(), "Date")
+                start_time = parse_time(start_var.get(), "Start time")
+                end_time = parse_time(end_var.get(), "End time")
+                start = combine_date_time(day, start_time)
+                end = combine_date_time(day, end_time)
+            except ValueError as exc:
+                messagebox.showerror("Invalid input", str(exc), parent=dialog)
+                return
+
+            description = description_box.get("1.0", tk.END).strip()
+            conflicts = self.scheduler.conflicts_with(start, end)
+            if conflicts:
+                conflict_lines = "\n".join(
+                    f"• {e.title} ({e.start.strftime(TIME_FORMAT)}–{e.end.strftime(TIME_FORMAT)})"
+                    for e in conflicts
+                )
+                proceed = messagebox.askyesno(
+                    "Schedule conflict",
+                    f"This event overlaps with:\n\n{conflict_lines}\n\nAdd anyway?",
+                    parent=dialog,
+                )
+                if not proceed:
+                    return
+
+            try:
+                event = self.scheduler.add_event(title, start, end, description)
+            except ValueError as exc:
+                messagebox.showerror("Cannot add event", str(exc), parent=dialog)
+                return
+
+            dialog.destroy()
+            if self.current_view == "today":
+                self.view_date = day
+            elif self.current_view == "week":
+                self.week_start = day - timedelta(days=day.weekday())
+            self.selected_id = event.id
+            self.refresh_all()
+            messagebox.showinfo("Event added", f"Added: {event.title}\n{event.start.strftime(DATETIME_FORMAT)}")
+
+        buttons = ttk.Frame(form)
+        buttons.grid(row=5, column=0, columnspan=2, sticky="e", pady=(16, 0))
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(buttons, text="Add Event", style="Primary.TButton", command=save).pack(side="right")
+
+    def delete_selected(self) -> None:
+        if not self.selected_id:
+            return
+        event = self.scheduler.find_event(self.selected_id)
+        if not event:
+            return
+        if not messagebox.askyesno(
+            "Delete event",
+            f"Delete '{event.title}'?\nThis cannot be undone.",
+        ):
+            return
+        self.scheduler.delete_event(event.id)
+        self.selected_id = None
+        self.refresh_all()
+        self._show_detail(None)
+
+
+def main() -> None:
+    root = tk.Tk()
+    SchedulingApp(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
