@@ -1,0 +1,854 @@
+"""
+Grants Process App — track grant applications through submission and review.
+
+Run: python grants_process_app.py
+"""
+
+from __future__ import annotations
+
+import json
+import tkinter as tk
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from enum import Enum
+from pathlib import Path
+from tkinter import messagebox, ttk
+from typing import Optional
+
+
+DATA_FILE = Path(__file__).with_name("grants_data.json")
+DATE_FORMAT = "%Y-%m-%d"
+DATETIME_FORMAT = f"{DATE_FORMAT} %H:%M"
+
+
+class GrantStatus(str, Enum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    UNDER_REVIEW = "under_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    WITHDRAWN = "withdrawn"
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        return [s.value for s in cls]
+
+    @property
+    def label(self) -> str:
+        labels = {
+            GrantStatus.DRAFT: "Draft",
+            GrantStatus.SUBMITTED: "Submitted",
+            GrantStatus.UNDER_REVIEW: "Under Review",
+            GrantStatus.APPROVED: "Approved",
+            GrantStatus.REJECTED: "Rejected",
+            GrantStatus.WITHDRAWN: "Withdrawn",
+        }
+        return labels[self]
+
+
+VALID_TRANSITIONS: dict[GrantStatus, set[GrantStatus]] = {
+    GrantStatus.DRAFT: {GrantStatus.SUBMITTED, GrantStatus.WITHDRAWN},
+    GrantStatus.SUBMITTED: {GrantStatus.UNDER_REVIEW, GrantStatus.WITHDRAWN, GrantStatus.DRAFT},
+    GrantStatus.UNDER_REVIEW: {GrantStatus.APPROVED, GrantStatus.REJECTED, GrantStatus.WITHDRAWN},
+    GrantStatus.APPROVED: set(),
+    GrantStatus.REJECTED: {GrantStatus.DRAFT},
+    GrantStatus.WITHDRAWN: {GrantStatus.DRAFT},
+}
+
+
+@dataclass
+class StatusChange:
+    from_status: str
+    to_status: str
+    changed_at: str
+    note: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "from_status": self.from_status,
+            "to_status": self.to_status,
+            "changed_at": self.changed_at,
+            "note": self.note,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> StatusChange:
+        return cls(
+            from_status=data["from_status"],
+            to_status=data["to_status"],
+            changed_at=data["changed_at"],
+            note=data.get("note", ""),
+        )
+
+
+@dataclass
+class GrantApplication:
+    grant_name: str
+    funder: str
+    applicant: str
+    amount_requested: float
+    deadline: date
+    project_summary: str = ""
+    status: GrantStatus = GrantStatus.DRAFT
+    amount_awarded: Optional[float] = None
+    submitted_date: Optional[date] = None
+    decision_date: Optional[date] = None
+    notes: str = ""
+    id: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%d%H%M%S%f"))
+    created_at: str = field(default_factory=lambda: datetime.now().strftime(DATETIME_FORMAT))
+    history: list[StatusChange] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "grant_name": self.grant_name,
+            "funder": self.funder,
+            "applicant": self.applicant,
+            "amount_requested": self.amount_requested,
+            "amount_awarded": self.amount_awarded,
+            "deadline": self.deadline.strftime(DATE_FORMAT),
+            "submitted_date": self.submitted_date.strftime(DATE_FORMAT) if self.submitted_date else None,
+            "decision_date": self.decision_date.strftime(DATE_FORMAT) if self.decision_date else None,
+            "project_summary": self.project_summary,
+            "status": self.status.value,
+            "notes": self.notes,
+            "created_at": self.created_at,
+            "history": [entry.to_dict() for entry in self.history],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> GrantApplication:
+        return cls(
+            id=data["id"],
+            grant_name=data["grant_name"],
+            funder=data["funder"],
+            applicant=data["applicant"],
+            amount_requested=float(data["amount_requested"]),
+            amount_awarded=float(data["amount_awarded"]) if data.get("amount_awarded") is not None else None,
+            deadline=datetime.strptime(data["deadline"], DATE_FORMAT).date(),
+            submitted_date=(
+                datetime.strptime(data["submitted_date"], DATE_FORMAT).date()
+                if data.get("submitted_date")
+                else None
+            ),
+            decision_date=(
+                datetime.strptime(data["decision_date"], DATE_FORMAT).date()
+                if data.get("decision_date")
+                else None
+            ),
+            project_summary=data.get("project_summary", ""),
+            status=GrantStatus(data["status"]),
+            notes=data.get("notes", ""),
+            created_at=data.get("created_at", datetime.now().strftime(DATETIME_FORMAT)),
+            history=[StatusChange.from_dict(entry) for entry in data.get("history", [])],
+        )
+
+
+class GrantsManager:
+    def __init__(self, data_file: Path = DATA_FILE) -> None:
+        self.data_file = data_file
+        self.applications: list[GrantApplication] = []
+        self.load()
+
+    def load(self) -> None:
+        if not self.data_file.exists():
+            self.applications = []
+            return
+        try:
+            raw = json.loads(self.data_file.read_text(encoding="utf-8"))
+            self.applications = [GrantApplication.from_dict(item) for item in raw]
+            self.applications.sort(key=lambda g: g.deadline)
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            print(f"Warning: could not load grants data ({exc}). Starting fresh.")
+            self.applications = []
+
+    def save(self) -> None:
+        payload = [app.to_dict() for app in self.applications]
+        self.data_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def add_application(
+        self,
+        grant_name: str,
+        funder: str,
+        applicant: str,
+        amount_requested: float,
+        deadline: date,
+        project_summary: str = "",
+        notes: str = "",
+    ) -> GrantApplication:
+        app = GrantApplication(
+            grant_name=grant_name,
+            funder=funder,
+            applicant=applicant,
+            amount_requested=amount_requested,
+            deadline=deadline,
+            project_summary=project_summary,
+            notes=notes,
+        )
+        app.history.append(
+            StatusChange(
+                from_status="",
+                to_status=GrantStatus.DRAFT.value,
+                changed_at=datetime.now().strftime(DATETIME_FORMAT),
+                note="Application created",
+            )
+        )
+        self.applications.append(app)
+        self.applications.sort(key=lambda g: g.deadline)
+        self.save()
+        return app
+
+    def find(self, app_id: str) -> Optional[GrantApplication]:
+        for app in self.applications:
+            if app.id == app_id:
+                return app
+        return None
+
+    def delete(self, app_id: str) -> bool:
+        before = len(self.applications)
+        self.applications = [a for a in self.applications if a.id != app_id]
+        if len(self.applications) == before:
+            return False
+        self.save()
+        return True
+
+    def by_status(self, status: GrantStatus) -> list[GrantApplication]:
+        return [a for a in self.applications if a.status == status]
+
+    def upcoming_deadlines(self, within_days: int = 30) -> list[GrantApplication]:
+        today = date.today()
+        cutoff = today.toordinal() + within_days
+        active = {GrantStatus.DRAFT, GrantStatus.SUBMITTED, GrantStatus.UNDER_REVIEW}
+        return [
+            a
+            for a in self.applications
+            if a.status in active and today.toordinal() <= a.deadline.toordinal() <= cutoff
+        ]
+
+    def update_status(
+        self,
+        app: GrantApplication,
+        new_status: GrantStatus,
+        note: str = "",
+        amount_awarded: Optional[float] = None,
+    ) -> None:
+        if new_status == app.status:
+            raise ValueError(f"Application is already {app.status.label}.")
+
+        allowed = VALID_TRANSITIONS.get(app.status, set())
+        if new_status not in allowed:
+            allowed_labels = ", ".join(s.label for s in sorted(allowed, key=lambda s: s.value)) or "none"
+            raise ValueError(
+                f"Cannot move from {app.status.label} to {new_status.label}. "
+                f"Allowed next steps: {allowed_labels}."
+            )
+
+        old_status = app.status
+        app.status = new_status
+        app.history.append(
+            StatusChange(
+                from_status=old_status.value,
+                to_status=new_status.value,
+                changed_at=datetime.now().strftime(DATETIME_FORMAT),
+                note=note,
+            )
+        )
+
+        if new_status == GrantStatus.SUBMITTED and app.submitted_date is None:
+            app.submitted_date = date.today()
+
+        if new_status in {GrantStatus.APPROVED, GrantStatus.REJECTED}:
+            app.decision_date = date.today()
+
+        if new_status == GrantStatus.APPROVED:
+            if amount_awarded is None:
+                raise ValueError("Approved grants require an awarded amount.")
+            if amount_awarded < 0:
+                raise ValueError("Awarded amount cannot be negative.")
+            app.amount_awarded = amount_awarded
+
+        if new_status == GrantStatus.DRAFT:
+            app.submitted_date = None
+            app.decision_date = None
+            if old_status != GrantStatus.REJECTED:
+                app.amount_awarded = None
+
+        self.save()
+
+
+STATUS_COLORS = {
+    GrantStatus.DRAFT: "#6b7280",
+    GrantStatus.SUBMITTED: "#2563eb",
+    GrantStatus.UNDER_REVIEW: "#d97706",
+    GrantStatus.APPROVED: "#059669",
+    GrantStatus.REJECTED: "#dc2626",
+    GrantStatus.WITHDRAWN: "#7c3aed",
+}
+
+
+def parse_date(value: str, label: str = "Date") -> date:
+    try:
+        return datetime.strptime(value.strip(), DATE_FORMAT).date()
+    except ValueError as exc:
+        raise ValueError(f"{label} must be in YYYY-MM-DD format.") from exc
+
+
+def parse_amount(value: str, label: str = "Amount") -> float:
+    try:
+        amount = float(value.replace(",", "").replace("$", "").strip())
+    except ValueError as exc:
+        raise ValueError(f"{label} must be a number.") from exc
+    if amount < 0:
+        raise ValueError(f"{label} cannot be negative.")
+    return amount
+
+
+def format_money(amount: float) -> str:
+    return f"${amount:,.2f}"
+
+
+def days_until(deadline: date) -> int:
+    return (deadline - date.today()).days
+
+
+def deadline_label(app: GrantApplication) -> str:
+    text = app.deadline.strftime(DATE_FORMAT)
+    if app.status not in {GrantStatus.DRAFT, GrantStatus.SUBMITTED, GrantStatus.UNDER_REVIEW}:
+        return text
+    days = days_until(app.deadline)
+    if days < 0:
+        return f"{text} (overdue)"
+    if days == 0:
+        return f"{text} (today)"
+    if days <= 7:
+        return f"{text} ({days}d left)"
+    return text
+
+
+class ScrollableFrame(ttk.Frame):
+    def __init__(self, parent: tk.Misc, **kwargs) -> None:
+        super().__init__(parent, **kwargs)
+        canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        self.inner = ttk.Frame(canvas)
+        self.inner.bind(
+            "<Configure>",
+            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def _on_mousewheel(event: tk.Event) -> None:
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+
+class GrantsApp:
+    """Desktop interface for managing grant applications."""
+
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.manager = GrantsManager()
+        self.selected_id: Optional[str] = None
+        self.current_view = "applications"
+
+        self.root.title("Grants Process App")
+        self.root.geometry("1100x720")
+        self.root.minsize(900, 600)
+        self.root.configure(bg="#f3f4f6")
+
+        self._setup_styles()
+        self._build_layout()
+        self.show_applications()
+        self.refresh_all()
+
+    def _setup_styles(self) -> None:
+        style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+
+        style.configure("App.TFrame", background="#f3f4f6")
+        style.configure("Header.TFrame", background="#1e3a5f")
+        style.configure("Header.TLabel", background="#1e3a5f", foreground="#ffffff", font=("Helvetica", 18, "bold"))
+        style.configure("Subheader.TLabel", background="#1e3a5f", foreground="#cbd5e1", font=("Helvetica", 11))
+        style.configure("Nav.TButton", font=("Helvetica", 11), padding=(12, 8))
+        style.configure("Primary.TButton", font=("Helvetica", 11, "bold"), padding=(14, 8))
+        style.configure("Card.TFrame", background="#ffffff", relief="flat")
+        style.configure("CardTitle.TLabel", background="#ffffff", font=("Helvetica", 13, "bold"), foreground="#111827")
+        style.configure("CardValue.TLabel", background="#ffffff", font=("Helvetica", 22, "bold"), foreground="#1e3a5f")
+        style.configure("CardSub.TLabel", background="#ffffff", font=("Helvetica", 10), foreground="#6b7280")
+        style.configure("Detail.TLabel", background="#ffffff", font=("Helvetica", 11), foreground="#374151")
+        style.configure("DetailTitle.TLabel", background="#ffffff", font=("Helvetica", 16, "bold"), foreground="#111827")
+        style.configure("Treeview", font=("Helvetica", 11), rowheight=30)
+        style.configure("Treeview.Heading", font=("Helvetica", 11, "bold"))
+
+    def _build_layout(self) -> None:
+        header = ttk.Frame(self.root, style="Header.TFrame")
+        header.pack(fill="x")
+
+        title_block = ttk.Frame(header, style="Header.TFrame")
+        title_block.pack(side="left", padx=24, pady=16)
+        ttk.Label(title_block, text="Grants Process App", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(
+            title_block,
+            text="Track applications from draft through approval",
+            style="Subheader.TLabel",
+        ).pack(anchor="w")
+
+        ttk.Button(
+            header,
+            text="+ New Application",
+            style="Primary.TButton",
+            command=self.open_create_dialog,
+        ).pack(side="right", padx=24, pady=16)
+
+        body = ttk.Frame(self.root, style="App.TFrame", padding=16)
+        body.pack(fill="both", expand=True)
+
+        nav = ttk.Frame(body, style="App.TFrame")
+        nav.pack(fill="x", pady=(0, 12))
+        ttk.Button(nav, text="Dashboard", style="Nav.TButton", command=self.show_dashboard).pack(side="left", padx=(0, 8))
+        ttk.Button(nav, text="Applications", style="Nav.TButton", command=self.show_applications).pack(side="left")
+
+        self.content = ttk.Frame(body, style="App.TFrame")
+        self.content.pack(fill="both", expand=True)
+
+        self.dashboard_frame = ttk.Frame(self.content, style="App.TFrame")
+        self.apps_frame = ttk.Frame(self.content, style="App.TFrame")
+        self._build_dashboard_view()
+        self._build_applications_view()
+
+    def _build_dashboard_view(self) -> None:
+        cards = ttk.Frame(self.dashboard_frame, style="App.TFrame")
+        cards.pack(fill="x", pady=(0, 16))
+
+        self.stat_card_vars: dict[str, tk.StringVar] = {}
+        card_defs = [
+            ("total", "Total Applications", "0"),
+            ("active", "Active Pipeline", "0"),
+            ("requested", "Amount Requested", "$0.00"),
+            ("awarded", "Amount Awarded", "$0.00"),
+        ]
+        for key, title, default in card_defs:
+            card = ttk.Frame(cards, style="Card.TFrame", padding=20)
+            card.pack(side="left", fill="both", expand=True, padx=(0, 12))
+            ttk.Label(card, text=title, style="CardSub.TLabel").pack(anchor="w")
+            var = tk.StringVar(value=default)
+            self.stat_card_vars[key] = var
+            ttk.Label(card, textvariable=var, style="CardValue.TLabel").pack(anchor="w", pady=(6, 0))
+
+        bottom = ttk.Frame(self.dashboard_frame, style="App.TFrame")
+        bottom.pack(fill="both", expand=True)
+
+        status_card = ttk.Frame(bottom, style="Card.TFrame", padding=20)
+        status_card.pack(side="left", fill="both", expand=True, padx=(0, 12))
+        ttk.Label(status_card, text="Applications by Status", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 12))
+        self.status_list = tk.Listbox(status_card, font=("Helvetica", 11), height=10, borderwidth=0, highlightthickness=0)
+        self.status_list.pack(fill="both", expand=True)
+
+        deadline_card = ttk.Frame(bottom, style="Card.TFrame", padding=20)
+        deadline_card.pack(side="left", fill="both", expand=True)
+        ttk.Label(deadline_card, text="Upcoming Deadlines (30 days)", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 12))
+        self.deadline_list = tk.Listbox(deadline_card, font=("Helvetica", 11), height=10, borderwidth=0, highlightthickness=0)
+        self.deadline_list.pack(fill="both", expand=True)
+
+    def _build_applications_view(self) -> None:
+        toolbar = ttk.Frame(self.apps_frame, style="App.TFrame")
+        toolbar.pack(fill="x", pady=(0, 12))
+
+        ttk.Label(toolbar, text="Search:").pack(side="left")
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *_: self.refresh_table())
+        ttk.Entry(toolbar, textvariable=self.search_var, width=28).pack(side="left", padx=(6, 16))
+
+        ttk.Label(toolbar, text="Status:").pack(side="left")
+        self.filter_var = tk.StringVar(value="All")
+        filter_box = ttk.Combobox(
+            toolbar,
+            textvariable=self.filter_var,
+            values=["All"] + [s.label for s in GrantStatus],
+            state="readonly",
+            width=16,
+        )
+        filter_box.pack(side="left", padx=(6, 0))
+        filter_box.bind("<<ComboboxSelected>>", lambda _event: self.refresh_table())
+
+        paned = ttk.Panedwindow(self.apps_frame, orient="horizontal")
+        paned.pack(fill="both", expand=True)
+
+        table_frame = ttk.Frame(paned, style="Card.TFrame", padding=8)
+        paned.add(table_frame, weight=3)
+
+        columns = ("grant", "funder", "status", "amount", "deadline")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+        self.tree.heading("grant", text="Grant")
+        self.tree.heading("funder", text="Funder")
+        self.tree.heading("status", text="Status")
+        self.tree.heading("amount", text="Requested")
+        self.tree.heading("deadline", text="Deadline")
+        self.tree.column("grant", width=180, anchor="w")
+        self.tree.column("funder", width=140, anchor="w")
+        self.tree.column("status", width=110, anchor="w")
+        self.tree.column("amount", width=100, anchor="e")
+        self.tree.column("deadline", width=130, anchor="w")
+        self.tree.tag_configure("overdue", foreground="#dc2626")
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+
+        tree_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tree_scroll.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        tree_scroll.pack(side="right", fill="y")
+
+        detail_outer = ttk.Frame(paned, style="Card.TFrame", padding=16)
+        paned.add(detail_outer, weight=2)
+
+        self.detail_scroll = ScrollableFrame(detail_outer)
+        self.detail_scroll.pack(fill="both", expand=True)
+        detail = self.detail_scroll.inner
+
+        self.detail_title = ttk.Label(detail, text="Select an application", style="DetailTitle.TLabel")
+        self.detail_title.pack(anchor="w", pady=(0, 12))
+
+        self.detail_body = ttk.Label(detail, text="", style="Detail.TLabel", wraplength=340, justify="left")
+        self.detail_body.pack(anchor="w", fill="x")
+
+        self.history_box = tk.Text(detail, height=8, font=("Helvetica", 10), wrap="word", state="disabled")
+        self.history_box.pack(fill="both", expand=True, pady=(12, 12))
+
+        actions = ttk.Frame(detail, style="Card.TFrame")
+        actions.pack(fill="x")
+        self.status_button = ttk.Button(actions, text="Update Status", command=self.open_status_dialog, state="disabled")
+        self.status_button.pack(side="left", padx=(0, 8))
+        self.delete_button = ttk.Button(actions, text="Delete", command=self.delete_selected, state="disabled")
+        self.delete_button.pack(side="left")
+
+    def show_dashboard(self) -> None:
+        self.current_view = "dashboard"
+        self.apps_frame.pack_forget()
+        self.dashboard_frame.pack(fill="both", expand=True)
+        self.refresh_dashboard()
+
+    def show_applications(self) -> None:
+        self.current_view = "applications"
+        self.dashboard_frame.pack_forget()
+        self.apps_frame.pack(fill="both", expand=True)
+        self.refresh_table()
+
+    def refresh_all(self) -> None:
+        if self.current_view == "dashboard":
+            self.refresh_dashboard()
+        else:
+            self.refresh_table()
+
+    def refresh_dashboard(self) -> None:
+        apps = self.manager.applications
+        active = [a for a in apps if a.status in {GrantStatus.DRAFT, GrantStatus.SUBMITTED, GrantStatus.UNDER_REVIEW}]
+        approved = self.manager.by_status(GrantStatus.APPROVED)
+
+        self.stat_card_vars["total"].set(str(len(apps)))
+        self.stat_card_vars["active"].set(str(len(active)))
+        self.stat_card_vars["requested"].set(format_money(sum(a.amount_requested for a in active)))
+        self.stat_card_vars["awarded"].set(format_money(sum(a.amount_awarded or 0 for a in approved)))
+
+        self.status_list.delete(0, tk.END)
+        for status in GrantStatus:
+            count = len(self.manager.by_status(status))
+            if count:
+                self.status_list.insert(tk.END, f"  {status.label}: {count}")
+
+        self.deadline_list.delete(0, tk.END)
+        upcoming = sorted(self.manager.upcoming_deadlines(30), key=lambda a: a.deadline)
+        if not upcoming:
+            self.deadline_list.insert(tk.END, "  No upcoming deadlines")
+        for app in upcoming:
+            self.deadline_list.insert(tk.END, f"  {app.grant_name} — {deadline_label(app)}")
+
+    def _filtered_apps(self) -> list[GrantApplication]:
+        query = self.search_var.get().strip().lower()
+        status_filter = self.filter_var.get()
+
+        apps = self.manager.applications
+        if status_filter != "All":
+            apps = [a for a in apps if a.status.label == status_filter]
+        if query:
+            apps = [
+                a
+                for a in apps
+                if query in a.grant_name.lower()
+                or query in a.funder.lower()
+                or query in a.applicant.lower()
+            ]
+        return apps
+
+    def refresh_table(self) -> None:
+        selected = self.selected_id
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+
+        visible_ids: list[str] = []
+        for app in self._filtered_apps():
+            tags = ()
+            if app.status in {GrantStatus.DRAFT, GrantStatus.SUBMITTED, GrantStatus.UNDER_REVIEW}:
+                if days_until(app.deadline) < 0:
+                    tags = ("overdue",)
+            self.tree.insert(
+                "",
+                tk.END,
+                iid=app.id,
+                values=(
+                    app.grant_name,
+                    app.funder,
+                    app.status.label,
+                    format_money(app.amount_requested),
+                    deadline_label(app),
+                ),
+                tags=tags,
+            )
+            visible_ids.append(app.id)
+
+        if selected and selected in visible_ids:
+            self.tree.selection_set(selected)
+            self.tree.focus(selected)
+        else:
+            self.selected_id = None
+            self._show_detail(None)
+
+    def _on_select(self, _event: Optional[tk.Event] = None) -> None:
+        selection = self.tree.selection()
+        if not selection:
+            self.selected_id = None
+            self._show_detail(None)
+            return
+        self.selected_id = selection[0]
+        app = self.manager.find(self.selected_id)
+        self._show_detail(app)
+
+    def _show_detail(self, app: Optional[GrantApplication]) -> None:
+        if not app:
+            self.detail_title.configure(text="Select an application")
+            self.detail_body.configure(text="Click a row in the table to view details, update status, or delete.")
+            self.history_box.configure(state="normal")
+            self.history_box.delete("1.0", tk.END)
+            self.history_box.configure(state="disabled")
+            self.status_button.configure(state="disabled")
+            self.delete_button.configure(state="disabled")
+            return
+
+        self.detail_title.configure(text=app.grant_name)
+        lines = [
+            f"Funder: {app.funder}",
+            f"Applicant: {app.applicant}",
+            f"Status: {app.status.label}",
+            f"Requested: {format_money(app.amount_requested)}",
+            f"Deadline: {deadline_label(app)}",
+        ]
+        if app.amount_awarded is not None:
+            lines.append(f"Awarded: {format_money(app.amount_awarded)}")
+        if app.submitted_date:
+            lines.append(f"Submitted: {app.submitted_date.strftime(DATE_FORMAT)}")
+        if app.decision_date:
+            lines.append(f"Decision: {app.decision_date.strftime(DATE_FORMAT)}")
+        if app.project_summary:
+            lines.append(f"\nSummary:\n{app.project_summary}")
+        if app.notes:
+            lines.append(f"\nNotes:\n{app.notes}")
+
+        self.detail_body.configure(text="\n".join(lines))
+
+        self.history_box.configure(state="normal")
+        self.history_box.delete("1.0", tk.END)
+        self.history_box.insert(tk.END, "Status History\n" + ("-" * 28) + "\n")
+        for entry in app.history:
+            if entry.from_status:
+                note = f" — {entry.note}" if entry.note else ""
+                self.history_box.insert(tk.END, f"{entry.changed_at}\n  {entry.from_status} → {entry.to_status}{note}\n\n")
+            else:
+                self.history_box.insert(tk.END, f"{entry.changed_at}\n  Created — {entry.note or 'Application created'}\n\n")
+        self.history_box.configure(state="disabled")
+
+        allowed = VALID_TRANSITIONS.get(app.status, set())
+        self.status_button.configure(state="normal" if allowed else "disabled")
+        self.delete_button.configure(state="normal")
+
+    def open_create_dialog(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("New Grant Application")
+        dialog.geometry("480x520")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        form = ttk.Frame(dialog, padding=24)
+        form.pack(fill="both", expand=True)
+
+        fields: dict[str, tk.Variable] = {
+            "grant_name": tk.StringVar(),
+            "funder": tk.StringVar(),
+            "applicant": tk.StringVar(value="Your name"),
+            "amount": tk.StringVar(value="10000"),
+            "deadline": tk.StringVar(value=date.today().strftime(DATE_FORMAT)),
+            "summary": tk.StringVar(),
+            "notes": tk.StringVar(),
+        }
+
+        def add_field(row: int, label: str, key: str, height: int = 1) -> None:
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky="nw", pady=6)
+            if height > 1:
+                widget = tk.Text(form, height=height, width=36, font=("Helvetica", 11))
+                widget.grid(row=row, column=1, sticky="ew", pady=6)
+                fields[key] = widget  # type: ignore[assignment]
+            else:
+                ttk.Entry(form, textvariable=fields[key], width=38).grid(row=row, column=1, sticky="ew", pady=6)
+
+        add_field(0, "Grant name *", "grant_name")
+        add_field(1, "Funder *", "funder")
+        add_field(2, "Applicant *", "applicant")
+        add_field(3, "Amount requested ($) *", "amount")
+        add_field(4, "Deadline (YYYY-MM-DD) *", "deadline")
+        add_field(5, "Project summary", "summary", height=3)
+        add_field(6, "Internal notes", "notes", height=3)
+        form.columnconfigure(1, weight=1)
+
+        def save() -> None:
+            grant_name = fields["grant_name"].get().strip()
+            funder = fields["funder"].get().strip()
+            applicant = fields["applicant"].get().strip()
+            if not grant_name or not funder or not applicant:
+                messagebox.showerror("Missing fields", "Grant name, funder, and applicant are required.", parent=dialog)
+                return
+            try:
+                amount = parse_amount(fields["amount"].get(), "Amount requested")
+                deadline = parse_date(fields["deadline"].get(), "Deadline")
+            except ValueError as exc:
+                messagebox.showerror("Invalid input", str(exc), parent=dialog)
+                return
+
+            summary_widget = fields["summary"]
+            notes_widget = fields["notes"]
+            summary = summary_widget.get("1.0", tk.END).strip() if isinstance(summary_widget, tk.Text) else ""
+            notes = notes_widget.get("1.0", tk.END).strip() if isinstance(notes_widget, tk.Text) else ""
+
+            app = self.manager.add_application(
+                grant_name=grant_name,
+                funder=funder,
+                applicant=applicant,
+                amount_requested=amount,
+                deadline=deadline,
+                project_summary=summary,
+                notes=notes,
+            )
+            dialog.destroy()
+            self.show_applications()
+            self.selected_id = app.id
+            self.refresh_all()
+            messagebox.showinfo("Created", f"Draft application created:\n{app.grant_name}")
+
+        buttons = ttk.Frame(form)
+        buttons.grid(row=7, column=0, columnspan=2, sticky="e", pady=(16, 0))
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(buttons, text="Create Application", style="Primary.TButton", command=save).pack(side="right")
+
+    def open_status_dialog(self) -> None:
+        if not self.selected_id:
+            return
+        app = self.manager.find(self.selected_id)
+        if not app:
+            return
+
+        allowed = sorted(VALID_TRANSITIONS.get(app.status, set()), key=lambda s: s.value)
+        if not allowed:
+            messagebox.showinfo("No changes", f"This application is already {app.status.label}.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Update Status")
+        dialog.geometry("420x320")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=24)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text=app.grant_name, font=("Helvetica", 13, "bold")).pack(anchor="w")
+        ttk.Label(frame, text=f"Current status: {app.status.label}").pack(anchor="w", pady=(4, 12))
+
+        ttk.Label(frame, text="Move to:").pack(anchor="w")
+        status_var = tk.StringVar(value=allowed[0].label)
+        ttk.Combobox(
+            frame,
+            textvariable=status_var,
+            values=[s.label for s in allowed],
+            state="readonly",
+        ).pack(fill="x", pady=(4, 12))
+
+        ttk.Label(frame, text="Note (optional):").pack(anchor="w")
+        note_box = tk.Text(frame, height=4, font=("Helvetica", 11))
+        note_box.pack(fill="x", pady=(4, 12))
+
+        award_frame = ttk.Frame(frame)
+        ttk.Label(award_frame, text="Amount awarded ($):").pack(side="left")
+        award_var = tk.StringVar(value=str(app.amount_requested))
+        award_entry = ttk.Entry(award_frame, textvariable=award_var, width=16)
+        award_entry.pack(side="left", padx=(8, 0))
+
+        label_to_status = {s.label: s for s in GrantStatus}
+
+        def toggle_award(*_args: object) -> None:
+            if status_var.get() == GrantStatus.APPROVED.label:
+                award_frame.pack(fill="x", pady=(0, 12))
+            else:
+                award_frame.pack_forget()
+
+        status_var.trace_add("write", toggle_award)
+        toggle_award()
+
+        def apply() -> None:
+            new_status = label_to_status[status_var.get()]
+            note = note_box.get("1.0", tk.END).strip()
+            amount_awarded: Optional[float] = None
+            if new_status == GrantStatus.APPROVED:
+                try:
+                    amount_awarded = parse_amount(award_var.get(), "Amount awarded")
+                except ValueError as exc:
+                    messagebox.showerror("Invalid input", str(exc), parent=dialog)
+                    return
+            try:
+                self.manager.update_status(app, new_status, note=note, amount_awarded=amount_awarded)
+            except ValueError as exc:
+                messagebox.showerror("Cannot update", str(exc), parent=dialog)
+                return
+            dialog.destroy()
+            self.refresh_all()
+            self._on_select()
+            messagebox.showinfo("Updated", f"Status updated to {new_status.label}.")
+
+        btn_row = ttk.Frame(frame)
+        btn_row.pack(fill="x")
+        ttk.Button(btn_row, text="Cancel", command=dialog.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(btn_row, text="Apply", style="Primary.TButton", command=apply).pack(side="right")
+
+    def delete_selected(self) -> None:
+        if not self.selected_id:
+            return
+        app = self.manager.find(self.selected_id)
+        if not app:
+            return
+        if not messagebox.askyesno("Delete application", f"Delete '{app.grant_name}'?\nThis cannot be undone."):
+            return
+        self.manager.delete(app.id)
+        self.selected_id = None
+        self.refresh_all()
+        self._show_detail(None)
+
+
+def main() -> None:
+    root = tk.Tk()
+    GrantsApp(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
